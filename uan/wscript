@@ -28,7 +28,7 @@ def build(bld):
         'helper/uan-helper.cc',
         'test/uan-test.cc',
         'test/uan-header-cumac-test.cc',
-        'test/uan-mac-cumac-test.cc',
+        #'test/uan-mac-cumac-test.cc',
         ]
     headers = bld.new_task_gen('ns3header')
     headers.module = 'uan'

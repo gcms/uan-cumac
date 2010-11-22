@@ -248,10 +248,13 @@ UanHeaderCumacBeacon::UanHeaderCumacBeacon ()
 
 }
 
-UanHeaderCumacBeacon::UanHeaderCumacBeacon (uint8_t channel, uint8_t signalInterval, Vector dstPosition)
+UanHeaderCumacBeacon::UanHeaderCumacBeacon (uint8_t channel, uint8_t signalInterval, uint16_t length,
+                                            Vector srcPosition, Vector dstPosition)
   : UanHeaderCommon (),
     m_channel (channel),
     m_signalInterval (signalInterval),
+    m_length (length),
+    m_srcPosition (srcPosition),
     m_dstPosition (dstPosition)
 {
 
@@ -273,6 +276,12 @@ UanHeaderCumacBeacon::GetTypeId ()
 
 }
 
+uint16_t
+UanHeaderCumacBeacon::GetLength (void) const
+{
+  return m_length;
+}
+
 uint8_t
 UanHeaderCumacBeacon::GetChannel (void) const
 {
@@ -291,11 +300,10 @@ UanHeaderCumacBeacon::GetDstPosition (void) const
   return m_dstPosition;
 }
 
-
-uint32_t
-UanHeaderCumacBeacon::GetSerializedSize (void) const
+Vector
+UanHeaderCumacBeacon::GetSrcPosition (void) const
 {
-  return UanHeaderCommon::GetSerializedSize () + 1 + 1 + 3 * 2;
+  return m_srcPosition;
 }
 
 void
@@ -316,6 +324,12 @@ UanHeaderCumacBeacon::SetDstPosition (Vector position)
   m_dstPosition = position;
 }
 
+uint32_t
+UanHeaderCumacBeacon::GetSerializedSize (void) const
+{
+  return UanHeaderCommon::GetSerializedSize () + 1 + 1 + 2 + (3 * 2) + (3 * 2);
+}
+
 void
 UanHeaderCumacBeacon::Serialize (Buffer::Iterator start) const
 {
@@ -324,6 +338,11 @@ UanHeaderCumacBeacon::Serialize (Buffer::Iterator start) const
 
   start.WriteU8 (m_channel);
   start.WriteU8 (m_signalInterval);
+  start.WriteU16 (m_length);
+
+  start.WriteU16 (m_srcPosition.x);
+  start.WriteU16 (m_srcPosition.y);
+  start.WriteU16 (m_srcPosition.z);
 
   start.WriteU16 (m_dstPosition.x);
   start.WriteU16 (m_dstPosition.y);
@@ -338,6 +357,12 @@ UanHeaderCumacBeacon::Deserialize (Buffer::Iterator start)
 
   m_channel = rbuf.ReadU8 ();
   m_signalInterval = rbuf.ReadU8 ();
+  m_length = rbuf.ReadU16 ();
+
+  m_srcPosition.x = rbuf.ReadU16 ();
+  m_srcPosition.y = rbuf.ReadU16 ();
+  m_srcPosition.z = rbuf.ReadU16 ();
+
 
   m_dstPosition.x = rbuf.ReadU16 ();
   m_dstPosition.y = rbuf.ReadU16 ();

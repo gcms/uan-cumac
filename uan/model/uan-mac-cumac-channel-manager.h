@@ -48,9 +48,17 @@ public:
 
   void SetMobilityModel (Ptr<MobilityModel> mobility);
 
-  void RegisterTransmission (Time start, uint8_t channelNo, Vector srcPosition, Time txDelay);
+  void RegisterTransmission (uint8_t channelNo, Time start, Time finish,
+                             Vector srcPosition, Vector dstPosition);
 
-  bool CanTransmit (Time time, uint8_t channelNo, Vector dstPosition);
+  bool CanTransmit (uint8_t channelNo, Time start, Time finish,
+                    Vector srcPosition, Vector dstPosition);
+
+  bool CanTransmitFromSrc (uint8_t channelNo, Time start, Time finish, Vector srcPosition);
+  bool CanTransmitToDst (uint8_t channelNo, Time start, Time finish, Vector dstPosition);
+
+  void ClearExpired (Time now);
+
 
   inline Time CalculateDelay (Vector srcPosition, Vector dstPosition) {
     return Seconds (CalculateDistance (srcPosition, dstPosition) / 1500.0);
@@ -65,23 +73,15 @@ private:
 
   class Entry {
   public:
-    Entry (uint8_t channel, Vector srcPosition, Time start, Time txDelay)
-    : m_channel (channel), m_srcPosition (srcPosition), m_start(start), m_txDelay (txDelay)
+    Entry (uint8_t channel, Time start, Time finish, Vector srcPosition, Vector dstPosition)
+    : m_channel (channel),
+      m_start (start), m_finish (finish),
+      m_srcPosition (srcPosition), m_dstPosition (dstPosition)
     {
     }
 
-    inline Time CalculateFinishTime (Vector position) {
-      double distance = CalculateDistance (m_srcPosition, position);
-      return m_start + m_txDelay + Seconds (distance / 1500.0);
-    }
-
-    inline Time CalculateFinishTime (void) {
-      Vector3D v(m_srcPosition.x, m_srcPosition.y, m_srcPosition.z + 550);
-      return CalculateFinishTime (v);
-    }
-
     inline bool IsExpired (Time now) {
-      return CalculateFinishTime () < now;
+      return m_finish + Seconds (60) < now;
     }
 
     inline uint8_t GetChannel (void) {
@@ -92,16 +92,24 @@ private:
       return m_srcPosition;
     }
 
+    inline Vector GetDstPosition (void) {
+      return m_dstPosition;
+    }
+
     inline Time GetStartTime (void) {
       return m_start;
     }
 
+    inline Time GetFinishTime (void) {
+      return m_finish;
+    }
+
   private:
     uint8_t m_channel;
-    Vector m_srcPosition;
     Time m_start;
-    Time m_txDelay;
-
+    Time m_finish;
+    Vector m_srcPosition;
+    Vector m_dstPosition;
   };
 
   typedef std::list<Entry> EntryList;

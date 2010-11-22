@@ -116,12 +116,29 @@ public:
   void EndTx (void);
 
 private:
+  /* protocol settings */
+  Time m_maxPropDelay;
+  int m_cwMin;
+  int m_cwMax;
+  Time m_timeSlot;
+
   typedef enum {
     IDLE,
     SENDING_RTS, WAITING_CTS, SENDING_DATA,
     SENDING_CTS, WAITING_DATA,
     SENDING_BEACON, WAITING_BEACON_RESPONSE
   } Status;
+
+  /* rts sending */
+  int m_cw;
+  int m_numRetries;
+  Time m_timeStartDelay;
+  Time m_timeCurrentDelay;
+  EventId m_currentTimer;
+  bool m_tryingRts;
+  bool m_timerRunning;
+  bool m_rtsCts;
+  EventId m_rtsWaitCtsEvent;
 
   Status m_status;
   bool m_tx;
@@ -190,7 +207,12 @@ private:
   void WaitBeacon (void);
   void CheckBeacon (void);
 
+  void StartRts (void);
+  void TryRts (void);
   void SendRts (void);
+
+  void StopTimer (void);
+  void StartTimer (void);
 
   void StartCts (void);
   void WaitCts (void);

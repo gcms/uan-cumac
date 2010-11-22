@@ -159,14 +159,19 @@ public:
    * \brief
    * \param
    */
-  UanHeaderCumacBeacon (uint8_t channel, uint8_t signalInterval, Vector dstPosition);
+  UanHeaderCumacBeacon (uint8_t channel, uint8_t signalInterval, uint16_t length,
+                        Vector srcPosition, Vector dstPosition);
   ~UanHeaderCumacBeacon ();
 
   static TypeId GetTypeId (void);
 
+  uint16_t GetLength (void) const;
+
   uint8_t GetChannel (void) const;
 
   uint8_t GetSignalInterval (void) const;
+
+  Vector GetSrcPosition (void) const;
 
   Vector GetDstPosition (void) const;
 
@@ -186,6 +191,8 @@ public:
 private:
   uint8_t m_channel;
   uint8_t m_signalInterval;
+  uint16_t m_length;
+  Vector m_srcPosition;
   Vector m_dstPosition;
 };
 /**
