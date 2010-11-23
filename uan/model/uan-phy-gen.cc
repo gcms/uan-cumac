@@ -562,7 +562,7 @@ UanPhyGen::StartRxPacket (Ptr<Packet> pkt, double rxPowerDb, UanTxMode txMode, U
 
 
         double newsinr = CalculateSinrDb (pkt, Simulator::Now (), rxPowerDb, txMode, pdp);
-        NS_LOG_DEBUG ("PHY " << m_mac->GetAddress () << ": Starting RX in IDLE mode.  SINR = " << newsinr);
+        NS_LOG_DEBUG ("PHY " << m_mac->GetAddress () << ": Starting RX in IDLE mode.  SINR = " << newsinr << "TxMode: " << txMode.GetUid ());
         if (newsinr > m_rxThreshDb)
           {
             m_state = RX;
@@ -781,8 +781,23 @@ UanPhyGen::NotifyIntChange (void)
 double
 UanPhyGen::CalculateSinrDb (Ptr<Packet> pkt, Time arrTime, double rxPowerDb, UanTxMode mode, UanPdp pdp)
 {
-  double noiseDb = m_channel->GetNoiseDbHz ( (double) mode.GetCenterFreqHz () / 1000.0) + 10 * log10 (mode.GetBandwidthHz ());
-  return m_sinr->CalcSinrDb (pkt, arrTime, rxPowerDb, noiseDb, mode, pdp, m_transducer->GetArrivalList ());
+  const UanTransducer::ArrivalList &arrivalList = m_transducer->GetArrivalList ();
+
+
+  UanTransducer::ArrivalList::const_iterator it;
+
+  UanTransducer::ArrivalList newArrivalList;
+  for (it = arrivalList.begin (); it != arrivalList.end (); it++) {
+    if (it->GetTxMode ().GetUid () == mode.GetUid ())
+      newArrivalList.push_back (*it);
+  }
+
+  bool isCumac = m_mac->GetInstanceTypeId () == TypeId::LookupByName ("ns3::UanMacCumac");
+
+  uint32_t freqHz = isCumac ? 10000 : mode.GetCenterFreqHz ();
+
+  double noiseDb = m_channel->GetNoiseDbHz ((double) freqHz / 1000.0) + 10 * log10 (mode.GetBandwidthHz ());
+  return m_sinr->CalcSinrDb (pkt, arrTime, rxPowerDb, noiseDb, mode, pdp, isCumac ? newArrivalList : arrivalList);
 }
 
 double
@@ -795,16 +810,24 @@ UanPhyGen::GetInterferenceDb (Ptr<Packet> pkt)
 
   double interfPower = 0;
 
-  for (; it != arrivalList.end (); it++)
-    {
-      if (pkt != it->GetPacket ())
-        {
-          interfPower += DbToKp (it->GetRxPowerDb ());
-        }
+  for (; it != arrivalList.end (); it++) {
+    bool hasmode = false;
+
+    for (uint32_t i = 0; i < GetNModes (); i++) {
+      if (it->GetTxMode ().GetUid () == GetMode (i).GetUid ()) {
+          hasmode = true;
+          break;
+      }
     }
 
-  return KpToDb (interfPower);
+    bool isCumac = m_mac->GetInstanceTypeId () == TypeId::LookupByName ("ns3::UanMacCumac");
 
+    if ((!isCumac || hasmode) && pkt != it->GetPacket ()) {
+        interfPower += DbToKp (it->GetRxPowerDb ());
+    }
+  }
+
+  return KpToDb (interfPower);
 }
 
 double

@@ -57,6 +57,8 @@ public:
   bool CanTransmitFromSrc (uint8_t channelNo, Time start, Time finish, Vector srcPosition);
   bool CanTransmitToDst (uint8_t channelNo, Time start, Time finish, Vector dstPosition);
 
+  bool IsRegistered (uint8_t channelNo, Vector position);
+
   void ClearExpired (Time now);
 
 
@@ -81,7 +83,7 @@ private:
     }
 
     inline bool IsExpired (Time now) {
-      return m_finish + Seconds (60) < now;
+      return m_finish + Seconds (5) < now;
     }
 
     inline uint8_t GetChannel (void) {
@@ -102,6 +104,18 @@ private:
 
     inline Time GetFinishTime (void) {
       return m_finish;
+    }
+
+    inline Time GetStartTimeAtDst (void) {
+      return m_start + CalculateDelay (GetSrcPosition (), GetDstPosition ());
+    }
+
+    inline Time GetFinishTimeAtDst (void) {
+      return m_finish + CalculateDelay (GetSrcPosition (), GetDstPosition ());
+    }
+
+    inline Time CalculateDelay (Vector srcPosition, Vector dstPosition) {
+      return Seconds (CalculateDistance (srcPosition, dstPosition) / 1500.0);
     }
 
   private:

@@ -143,6 +143,12 @@ private:
   Status m_status;
   bool m_tx;
 
+  std::map<UanAddress, Vector> m_positionTable;
+
+  void RegisterPosition (UanAddress addr, Vector position);
+
+  Time CalculateDelay (UanAddress src, UanAddress dst);
+
   UanAddress m_address;
   Ptr<UanPhy> m_phy;
 
@@ -171,7 +177,6 @@ private:
 
   /* waiting cts */
   EventId m_waitCtsEvent;
-
 
 
   Callback<void, Ptr<Packet>, const UanAddress& > m_forUpCb;

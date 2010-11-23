@@ -46,12 +46,13 @@ UanMacCumac::UanMacCumac ()
     m_maxPropDelay (Seconds (550.0 / 1500.0)),
     m_cwMin (2),
     m_cwMax (8),
+    m_tryingRts (false),
     m_status (IDLE),
+    m_tx (false),
     m_cleared (false)
-
 {
   m_cw = m_cwMin;
-  m_timeSlot = Seconds (m_maxPropDelay.GetSeconds () / std::pow(2, (double) m_cwMin));
+  m_timeSlot = Seconds (m_maxPropDelay.GetSeconds () / 2.0);//std::pow(2, (double) m_cwMin));
 }
 
 UanMacCumac::~UanMacCumac ()
@@ -99,8 +100,9 @@ UanMacCumac::GetAddress (void)
 void
 UanMacCumac::SetAddress (UanAddress addr)
 {
-  m_address=addr;
+  m_address = addr;
 }
+
 bool
 UanMacCumac::Enqueue (Ptr<Packet> packet, const Address &dest, uint16_t protocolNumber)
 {
@@ -134,6 +136,8 @@ UanMacCumac::StartRts ()
 void
 UanMacCumac::TryRts ()
 {
+  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " TRYING RTS TO " << m_dstAddress);
+
   NS_ASSERT(m_status == IDLE);
   if (++m_numRetries > 3) // maximum retries
     return;
@@ -141,7 +145,7 @@ UanMacCumac::TryRts ()
   int timeSlots = m_uv.GetInteger(0, std::pow((double)2, m_cw));
   m_cw = std::min(m_cwMax, m_cw + 1);
 
-  m_timeCurrentDelay = Seconds (m_timeSlot.GetSeconds () * timeSlots);
+  m_timeCurrentDelay = m_maxPropDelay + Seconds (m_timeSlot.GetSeconds () * timeSlots);
 
   m_tryingRts = true;
   m_timerRunning = false;
@@ -168,7 +172,7 @@ UanMacCumac::StartTimer (void)
     return;
 
   m_timeStartDelay = Simulator::Now ();
-  m_timeCurrentDelay = std::max(m_timeCurrentDelay, m_maxPropDelay);
+//  m_timeCurrentDelay = std::max(m_timeCurrentDelay, m_maxPropDelay);
   m_currentTimer = Simulator::Schedule(m_timeCurrentDelay, &UanMacCumac::SendRts, this);
   m_timerRunning = true;
 
@@ -197,23 +201,32 @@ UanMacCumac::SendRts (void)
 {
   m_tryingRts = false;
 
-  NS_LOG_DEBUG("" << Simulator::Now ().GetSeconds () << " " << m_address << " RTS " << m_dstAddress << "[frameNo=" << (int)m_currentFrameNo << "]");
+  NS_LOG_DEBUG("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RTS " << m_dstAddress << "[frameNo=" << (int)m_currentFrameNo << "]");
 
   ChannelList channelList;
 
   DataRate dataRate(m_modes[m_currentChannel].GetDataRateBps ());
 
   // time for rts + beacon (2 way) + cts
-  Time estimatedStartTime = Simulator::Now () + m_maxPropDelay + m_maxPropDelay + m_maxPropDelay + m_maxPropDelay;
-  Time estimatedFinishTime = estimatedStartTime + Seconds (dataRate.CalculateTxTime (m_packet->GetSize()));
+  Time estimatedStartTime = Simulator::Now () + CalculateDelay (m_address, m_dstAddress) // rts prop
+          + m_maxPropDelay + m_maxPropDelay // beacon prop
+          + CalculateDelay (m_address, m_dstAddress); // cts
+  Time estimatedFinishTime = estimatedStartTime + Seconds (dataRate.CalculateTxTime (m_packet->GetSize()))
+          + CalculateDelay (m_address, m_dstAddress) + Seconds (0.2);
 
   m_channelManager.SetMobilityModel (GetMobilityModel ());
+
   for (uint8_t i = 1; i < m_modes.GetNModes (); i++) {
+    if (!m_channelManager.IsRegistered(i, GetPosition ()))
+        channelList.insert (i);
+    }
+
+  for (uint8_t i = 1; i < m_modes.GetNModes () && channelList.size () < 3; i++) {
     if (m_channelManager.CanTransmitFromSrc(i, estimatedStartTime, estimatedFinishTime, GetPosition ()))
       channelList.insert (i);
   }
 
-  for (uint32_t i = 1; i < m_modes.GetNModes() && channelList.size () < 3; i++) {
+  for (uint8_t i = 1; i < m_modes.GetNModes() && channelList.size () < 3; i++) {
     channelList.insert (i);
   }
 
@@ -248,49 +261,21 @@ UanMacCumac::SetForwardUpCb (Callback<void, Ptr<Packet>, const UanAddress& > cb)
 }
 
 void
-LoadModesList (UanModesList &modes, uint16_t dataRateBps)
+LoadModesList (UanModesList &modes, UanTxMode baseMode)
 {
-//  for (uint32_t i = 1; i <= 5; i++) {
-//     uint32_t fcmode = 12000 + (i * dataRate) / 2.0;
-//
-//     UanTxMode mode = UanTxModeFactory::CreateMode (UanTxMode::QAM,
-//                                                    dataRate,
-//                                                    dataRate / 2,
-//                                                    fcmode,
-//                                                    dataRate,
-//                                                    4,
-//                                                    "channel " + i);
-//     list.AppendMode(mode);
-//
-//     NS_LOG_INFO("[" << mode.GetUid() << "] [" << i << "] Mode: " << mode.GetModType()
-//          << " FreqHz: " << mode.GetCenterFreqHz() << " BW: " << mode.GetBandwidthHz() << " Rate: " << mode.GetDataRateBps()
-//          << " PhyRate: " << mode.GetPhyRateSps() << " CS: " << mode.GetConstellationSize());
-//   }
-
-
+  uint32_t centerFreq = baseMode.GetCenterFreqHz ();
+  uint32_t dataRateBps = baseMode.GetDataRateBps ();
+  uint32_t constSize = baseMode.GetConstellationSize ();
 
   UanModesList list;
   for (uint8_t i = 0; i < 9; i++) {
-     uint32_t fcmode = 10000 + (i * dataRateBps) / 2.0;
+     uint32_t fcmode = centerFreq + (i * dataRateBps * 2) / 2.0;
 
-//     UanTxMode mode = UanTxModeFactory::CreateMode (UanTxMode::QAM,
-//                                                    dataRateBps,
-//                                                    dataRateBps / 2,
-//                                                    fcmode,
-//                                                    dataRateBps,
-//                                                    4,
-//                                                    "channel " + i);
-
-//    UanTxMode mode = UanTxModeFactory::CreateMode (UanTxMode::FSK,
-//                                                   dataRateBps,
-//                                                   dataRateBps, 10000 + dataRateBps * i,
-//                                                   dataRateBps, 2,
-//                                                   "channel " + i);
      UanTxMode mode = UanTxModeFactory::CreateMode (UanTxMode::FSK,
                                                     dataRateBps,
                                                     dataRateBps,
                                                     fcmode,
-                                                    dataRateBps, 2,
+                                                    dataRateBps, constSize,
                                                     "channel " + i);
 
     list.AppendMode (mode);
@@ -309,12 +294,13 @@ UanMacCumac::AttachPhy (Ptr<UanPhy> phy)
   m_phy->SetReceiveErrorCallback (MakeCallback (&UanMacCumac::RxPacketError, this));
   m_phy->RegisterListener (this);
 
-  LoadModesList (m_modes, 1000);
+  UanModesListValue list;
+  m_phy->GetAttribute("SupportedModes", list);
+
+  LoadModesList (m_modes, list.Get () [0]);
   NS_LOG_DEBUG ("No of modes: " << m_modes.GetNModes ());
 
   SetChannel (0);
-
-//  m_channelManager.SetMobilityModel (GetMobilityModel ());
 }
 
 Address
@@ -352,6 +338,7 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
 
       UanHeaderCumacRts rts;
       pkt->RemoveHeader (rts);
+      RegisterPosition (rts.GetSrc (), rts.GetPosition ());
 
       NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RTS RECEIVED [frameNo=" << (int)rts.GetFrameNo () << "]");
 
@@ -359,6 +346,8 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
     } else if (header.GetType () == CTS) {
       UanHeaderCumacCts cts;
       pkt->RemoveHeader (cts);
+      RegisterPosition (cts.GetSrc (), cts.GetSrcPosition());
+      RegisterPosition (cts.GetDest (), cts.GetDstPosition());
 
       NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " CTS RECEIVED [frameNo=" << (int)cts.GetFrameNo () << ", channelNo=" << (int)cts.GetChannel ()  << "]");
 
@@ -376,7 +365,7 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
 
       m_packet->AddHeader(data);
 
-      NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " SENDING DATA [frameNo=" << (int)cts.GetFrameNo () << ", channelNo=" << (int)cts.GetChannel ()  << ",length=" << m_packet->GetSize() << "]");
+      NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " SENDING DATA TO " << m_dstAddress << " [frameNo=" << (int)cts.GetFrameNo () << ", channelNo=" << (int)cts.GetChannel ()  << ",length=" << m_packet->GetSize() << "]");
 
       m_status = SENDING_DATA;
       SetChannel (cts.GetChannel ());
@@ -384,18 +373,20 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
     } else if (header.GetType () == BEACON) {
       UanHeaderCumacBeacon beacon;
       pkt->RemoveHeader (beacon);
+      RegisterPosition (beacon.GetSrc (), beacon.GetSrcPosition());
+      RegisterPosition (beacon.GetDest (), beacon.GetDstPosition());
 
       NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RECEIVED BEACON FROM " << header.GetSrc () << " CHANNEL: " << (int) beacon.GetChannel ());
       // use 'beacon response' wait time
-      //Time delayToMe = CalculateDelay (beacon.GetDstPosition (), GetPosition ());
+//      Time delayToMe = CalculateDelay (beacon.GetDstPosition (), GetPosition ());
 
       Time tonePulseInterval =  Seconds ((12 + 4 * beacon.GetSignalInterval ()) / 1000.0);
 
       DataRate dataRate (m_modes[m_currentChannel].GetDataRateBps ());
 
       // Beacon response + cts
-      Time estimatedStartTime = Simulator::Now () + m_maxPropDelay + tonePulseInterval + m_maxPropDelay;
-      Time estimatedFinishTime = estimatedStartTime + Seconds (dataRate.CalculateTxTime (beacon.GetLength ()));
+      Time estimatedStartTime = Simulator::Now () + m_maxPropDelay + CalculateDelay (beacon.GetSrcPosition (), beacon.GetDstPosition ());
+      Time estimatedFinishTime = estimatedStartTime + tonePulseInterval + Seconds (dataRate.CalculateTxTime (beacon.GetLength ()));
 
       m_channelManager.SetMobilityModel (GetMobilityModel ());
       if (!m_channelManager.CanTransmit(beacon.GetChannel (), estimatedStartTime, estimatedFinishTime,
@@ -405,7 +396,9 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
       } else {
         //If an item in the channel usage table corresponding to the receiver i has been in the reserved status for more than 2T + nτi
         Time start = Simulator::Now ();
-        Time finish = start + m_maxPropDelay + m_maxPropDelay + tonePulseInterval;
+        Time finish = start + m_maxPropDelay + m_maxPropDelay + tonePulseInterval + CalculateDelay (beacon.GetDstPosition(), GetPosition ());
+
+        NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " !!!! REGISTERED Tx [" << (int)beacon.GetChannel () << "] "  << start.GetSeconds () << " " << finish.GetSeconds ());
         m_channelManager.RegisterTransmission (beacon.GetChannel (), start, finish,
                 beacon.GetSrcPosition (), beacon.GetDstPosition ());
       }
@@ -414,6 +407,8 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
     if (header.GetType () == CTS) {
       UanHeaderCumacCts cts;
       pkt->RemoveHeader (cts);
+      RegisterPosition (cts.GetSrc (), cts.GetSrcPosition());
+      RegisterPosition (cts.GetDest (), cts.GetDstPosition());
 
       DataRate dataRate(txMode.GetDataRateBps ());
 
@@ -422,9 +417,10 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
 
       Time ctsTxTime = Seconds (dataRate.CalculateTxTime (cts.GetSerializedSize ()));
 
-      Time txStartTime = Simulator::Now () + (delayToSrc - delayToMe) + ctsTxTime;
-      Time dataTxTime = Seconds (dataRate.CalculateTxTime (cts.GetPacketSize() + 1));
+      Time txStartTime = Simulator::Now () + (delayToSrc - delayToMe);
+      Time dataTxTime = Seconds (dataRate.CalculateTxTime (cts.GetPacketSize() + 1)) + ctsTxTime;
 
+      NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " !!!! REGISTERED Tx [" << (int)cts.GetChannel () << "] " << txStartTime.GetSeconds () << " " << (txStartTime + dataTxTime).GetSeconds ());
       m_channelManager.SetMobilityModel (GetMobilityModel ());
       m_channelManager.RegisterTransmission(cts.GetChannel (), txStartTime, txStartTime + dataTxTime,
               cts.GetSrcPosition (), cts.GetDstPosition ());
@@ -435,15 +431,18 @@ UanMacCumac::RxPacketGood (Ptr<Packet> pkt, double sinr, UanTxMode txMode)
         StartTimer();
       }
     } else if (header.GetType () == RTS && m_tryingRts) {
+      NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RTS WHILE TRYING TO RTS");
       NS_ASSERT(m_currentChannel == 0);
 
       UanHeaderCumacRts rts;
       pkt->RemoveHeader (rts);
+      RegisterPosition (rts.GetSrc (), rts.GetPosition());
 
       Time delayToMe = CalculateDelay (rts.GetPosition (), GetPosition ());
-      Time timeToWait = m_maxPropDelay + m_maxPropDelay - delayToMe;
+      Time delayDstSrc = CalculateDelay (rts.GetSrc (), rts.GetDest ());
+      Time timeToWait = (delayDstSrc - delayToMe) + delayDstSrc + m_maxPropDelay + m_maxPropDelay;
 
-      if (m_phy->IsStateIdle ())
+      if (m_timerRunning)
         StopTimer ();
 
       if (m_rtsCts)
@@ -478,7 +477,6 @@ UanMacCumac::NotifyRxStart (void)
   NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RxStart");
 
   if (m_tryingRts && !m_rtsCts && m_timerRunning) {
-    NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RtsCts " <<  m_rtsCts);
     StopTimer ();
   }
 }
@@ -486,8 +484,7 @@ UanMacCumac::NotifyRxStart (void)
 void
 UanMacCumac::NotifyRxEndOk (void)
 {
-  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RxEndOk");
-  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " BUSY? " << m_phy->IsStateBusy ());
+  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " RxEndOk " << m_phy->IsStateBusy ());
 
   if (m_tryingRts && !m_rtsCts && !m_phy->IsStateBusy () && !m_timerRunning) {
     StartTimer ();
@@ -497,9 +494,8 @@ UanMacCumac::NotifyRxEndOk (void)
 void
 UanMacCumac::NotifyRxEndError (void)
 {
-  NS_LOG_DEBUG ("" << Simulator::Now () << " MAC " << m_address << " RxEndError");
+  NS_LOG_DEBUG ("" << Simulator::Now () << " MAC " << m_address << " RxEndError " << m_phy->IsStateBusy ());
 
-  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " BUSY? " << m_phy->IsStateBusy ());
   if (m_tryingRts && !m_rtsCts && !m_phy->IsStateBusy () && !m_timerRunning) {
     StartTimer ();
   }
@@ -681,11 +677,11 @@ UanMacCumac::CheckBeacon (void)
     NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " CHANNEL " << ((int) *m_currentTryingChannel) << " IS BUSY");
     m_currentTryingChannel++;
     SendBeacon ();
-  } else if (m_beaconCheckTimes++ < 4) {
+  } else if (m_beaconCheckTimes++ < 2) {
     NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " CHECKING FOR TONE PULSE...");
     double totalTxRxTimeInSeconds = (2 * 550.0 / 1500.0 + (12 + 4 * m_signalInterval) / 1000.0); // 2T + n*tau_i
 
-    Simulator::Schedule(Seconds(totalTxRxTimeInSeconds / 4.0), &UanMacCumac::CheckBeacon, this);
+    Simulator::Schedule(Seconds(totalTxRxTimeInSeconds / 2.0), &UanMacCumac::CheckBeacon, this);
   } else {
     NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " NO TONE PULSE RECEIVED");
     StartCts ();
@@ -695,7 +691,7 @@ UanMacCumac::CheckBeacon (void)
 void
 UanMacCumac::StartCts (void)
 {
-  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " SENDING CTS");
+  NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " SENDING CTS TO " << m_rtsReceived.GetSrc () );
   NS_LOG_DEBUG ("" << Simulator::Now ().GetSeconds () << " MAC " << m_address << " CHANNEL: " << ((int)*m_currentTryingChannel));
 
   NS_ASSERT(m_currentChannel == 0);
@@ -753,10 +749,12 @@ UanMacCumac::WaitCts (void)
 
   m_status = WAITING_CTS;
 
+  Time propDelaySrcDst = CalculateDelay (m_address, m_dstAddress);
+
   // Enough time for propagation of rts + propagation of three beacons + propagation of cts
   // also an additional time for accounting the tx Delay
-  Time totalDelay = m_maxPropDelay + m_maxPropDelay
-          + m_maxPropDelay + m_maxPropDelay
+  Time totalDelay = propDelaySrcDst + propDelaySrcDst // rts + cts
+          + m_maxPropDelay + m_maxPropDelay // beacons
           + m_maxPropDelay + m_maxPropDelay
           + m_maxPropDelay + m_maxPropDelay
           + Seconds (DataRate(m_modes[m_currentChannel].GetDataRateBps ()).CalculateTxTime (100));
@@ -772,6 +770,25 @@ UanMacCumac::CancelWaitCts (void)
   m_status = IDLE;
 
   TryRts ();
+}
+
+
+void
+UanMacCumac::RegisterPosition (UanAddress addr, Vector position)
+{
+  m_positionTable[addr] = position;
+  m_positionTable[m_address] = GetPosition ();
+}
+
+Time
+UanMacCumac::CalculateDelay (UanAddress src, UanAddress dst)
+{
+  if (m_positionTable.find (src) != m_positionTable.end ()
+          && m_positionTable.find (dst) != m_positionTable.end ()) {
+    return CalculateDelay (m_positionTable[src], m_positionTable[dst]);
+  }
+
+  return m_maxPropDelay;
 }
 
 }

@@ -33,49 +33,44 @@ UanMacCumacChannelManager::UanMacCumacChannelManager () :
 {
 }
 
-
 UanMacCumacChannelManager::~UanMacCumacChannelManager ()
 {
 }
 
-void
-UanMacCumacChannelManager::DoDispose ()
+void UanMacCumacChannelManager::DoDispose ()
 {
   Object::DoDispose ();
 }
 
-TypeId
-UanMacCumacChannelManager::GetTypeId (void)
+TypeId UanMacCumacChannelManager::GetTypeId (void)
 {
-  static TypeId tid = TypeId ("ns3::UanMacCumacChannelManager").
-          SetParent<Object> ().
-          AddConstructor<UanMacCumacChannelManager> ();
+  static TypeId tid =
+          TypeId ("ns3::UanMacCumacChannelManager"). SetParent<Object> (). AddConstructor<
+                  UanMacCumacChannelManager> ();
   return tid;
 }
 
-void
-UanMacCumacChannelManager::SetMobilityModel (Ptr<MobilityModel> mobility)
+void UanMacCumacChannelManager::SetMobilityModel (Ptr<MobilityModel> mobility)
 {
   m_mobility = mobility;
 }
 
-void
-UanMacCumacChannelManager::RegisterTransmission(uint8_t channelNo,
-                                                Time start, Time finish,
-                                                Vector srcPosition, Vector dstPosition)
+void UanMacCumacChannelManager::RegisterTransmission (uint8_t channelNo, Time start, Time finish,
+                                                      Vector srcPosition, Vector dstPosition)
 {
   m_transmissions.push_back (Entry (channelNo, start, finish, srcPosition, dstPosition));
 }
 
-void
-UanMacCumacChannelManager::ClearExpired (Time now)
+void UanMacCumacChannelManager::ClearExpired (Time now)
 {
   EntryList::iterator it = m_transmissions.begin ();
   for (; it != m_transmissions.end (); it++) {
     Entry &entry = *it;
 
     if (entry.IsExpired (now)) {
-      std::cout << entry.GetSrcPosition () << " expired" << std::endl;
+      NS_LOG_DEBUG (" !!!! " << entry.GetStartTime ().GetSeconds () << "-"
+              << entry.GetFinishTime ().GetSeconds () << " " << entry.GetSrcPosition () << " TO "
+              << entry.GetDstPosition () << " EXPIRED");
       m_transmissions.erase (it);
     }
   }
@@ -84,77 +79,95 @@ UanMacCumacChannelManager::ClearExpired (Time now)
 /*
  * check if channelNo will be free to transmit to dstPosition at a given time
  */
-bool
-UanMacCumacChannelManager::CanTransmit (uint8_t channelNo, Time start, Time finish,
-                                        Vector srcPosition, Vector dstPosition)
+bool UanMacCumacChannelManager::CanTransmit (uint8_t channelNo, Time start, Time finish,
+                                             Vector srcPosition, Vector dstPosition)
 {
   ClearExpired (start);
 
+  Time delay = CalculateDelay (srcPosition, dstPosition);
+
   return CanTransmitFromSrc (channelNo, start, finish, srcPosition)
-          && CanTransmitToDst(channelNo, start, finish, dstPosition);
+          && CanTransmitToDst (channelNo, start + delay, finish + delay, dstPosition);
 }
 
-bool
-UanMacCumacChannelManager::CanTransmitFromSrc (uint8_t channelNo, Time start, Time finish,
-                                               Vector srcPosition)
+bool UanMacCumacChannelManager::CanTransmitFromSrc (uint8_t channelNo, Time start, Time finish,
+                                                    Vector srcPosition)
 {
-//  std::cout << "UMCCM " << start.GetSeconds ()  << " " << finish.GetSeconds () << " " << srcPosition << std::endl;
+  //  std::cout << "UMCCM " << start.GetSeconds ()  << " " << finish.GetSeconds () << " " << srcPosition << std::endl;
 
 
   EntryList::iterator it = m_transmissions.begin ();
-  for (; it != m_transmissions.end(); it++) {
+  for (; it != m_transmissions.end (); it++) {
     Entry &entry = *it;
 
-//    std::cout << (int) channelNo << " <=> " << (int) entry.GetChannel () << std::endl;
     if (channelNo != entry.GetChannel ())
       continue;
 
-    // Check if current tx will be interfered by the src node
-//    std::cout << "Distance" << CalculateDistance (srcPosition, entry.GetDstPosition ()) << std::endl
-    if (CalculateDistance (entry.GetDstPosition (), srcPosition) <= 550) {
-      Time startTimeAtDst = start + CalculateDelay (srcPosition, entry.GetDstPosition ());
-      Time finishTimeAtDst = finish + CalculateDelay (srcPosition, entry.GetDstPosition ());
+    if (CalculateDistance (entry.GetDstPosition (), srcPosition) > 550)
+      continue;
 
-//      std::cout << "UMCCM AT DST" << entry.GetStartTime ().GetSeconds () << " " << entry.GetFinishTime ().GetSeconds () << std::endl;
-      if ((entry.GetStartTime () >= startTimeAtDst && entry.GetStartTime () <= finishTimeAtDst)
-              || (entry.GetFinishTime () >= startTimeAtDst && entry.GetFinishTime () <= finishTimeAtDst))
-        return false;
-    }
+
+    // Check if current tx will be interfered by the src node
+    Time startTimeAtDst = start + CalculateDelay (srcPosition, entry.GetDstPosition ());
+    Time finishTimeAtDst = finish + CalculateDelay (srcPosition, entry.GetDstPosition ());
+
+    //      std::cout << "UMCCM AT DST" << entry.GetStartTime ().GetSeconds () << " " << entry.GetFinishTime ().GetSeconds () << std::endl;
+    if ((entry.GetStartTimeAtDst () >= startTimeAtDst && entry.GetStartTimeAtDst () <= finishTimeAtDst)
+            || (entry.GetFinishTimeAtDst () >= startTimeAtDst && entry.GetFinishTimeAtDst () <= finishTimeAtDst))
+      return false;
+
   }
 
   return true;
 
-
 }
 
-bool
-UanMacCumacChannelManager::CanTransmitToDst (uint8_t channelNo, Time start, Time finish,
-                                             Vector dstPosition)
+bool UanMacCumacChannelManager::CanTransmitToDst (uint8_t channelNo, Time start, Time finish,
+                                                  Vector dstPosition)
 {
 
-
   EntryList::iterator it = m_transmissions.begin ();
-  for (; it != m_transmissions.end(); it++) {
+  for (; it != m_transmissions.end (); it++) {
     Entry &entry = *it;
 
     if (channelNo != entry.GetChannel ())
+      continue;
+
+    if (CalculateDistance (entry.GetSrcPosition (), dstPosition) > 550)
       continue;
 
     // Check if current tx will interfere with dst node
-//    std::cout << "Distance" << CalculateDistance (entry.GetSrcPosition (), dstPosition) << std::endl;
-    if (CalculateDistance (entry.GetSrcPosition (), dstPosition) <= 550) {
-      Time startTimeAtDst = entry.GetStartTime () + CalculateDelay (entry.GetSrcPosition (), dstPosition);
-      Time finishTimeAtDst = entry.GetFinishTime () + CalculateDelay (entry.GetSrcPosition (), dstPosition);
 
-      if ((start >= startTimeAtDst && start <= finishTimeAtDst)
-              || (finish >= startTimeAtDst && finish <= finishTimeAtDst))
-          return false;
-    }
+
+    Time startTimeAtDst = entry.GetStartTime () + CalculateDelay (entry.GetSrcPosition (), dstPosition);
+    Time finishTimeAtDst = entry.GetFinishTime () + CalculateDelay (entry.GetSrcPosition (), dstPosition);
+
+    if ((start >= startTimeAtDst && start <= finishTimeAtDst) || (finish >= startTimeAtDst
+            && finish <= finishTimeAtDst))
+      return false;
+
 
   }
 
   return true;
 
+}
+
+bool
+UanMacCumacChannelManager::IsRegistered (uint8_t channelNo, Vector position)
+{
+  EntryList::iterator it = m_transmissions.begin ();
+  for (; it != m_transmissions.end (); it++) {
+    Entry &entry = *it;
+
+    if (channelNo == entry.GetChannel ())
+      return true;
+
+//    if (CalculateDistance (entry.GetDstPosition (), position) <= 550)
+//      return true;
+  }
+
+  return false;
 }
 
 }
